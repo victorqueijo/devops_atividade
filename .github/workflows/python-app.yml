@@ -1,0 +1,92 @@
+name: CI/CD FastAPI - Homologacao e Producao
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+
+env:
+  IMAGE_NAME: fastapi-devops-app
+
+jobs:
+  build:
+    name: Build e Testes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Executar testes
+        run: pytest
+
+      - name: Build da imagem Docker
+        run: docker build -t ${{ env.IMAGE_NAME }}:${{ github.sha }} .
+
+      - name: Salvar imagem Docker como artifact
+        run: docker save ${{ env.IMAGE_NAME }}:${{ github.sha }} -o image.tar
+
+      - name: Upload do artifact da imagem
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: image.tar
+
+  deploy_homologacao:
+    name: Deploy Homologação
+    needs: build
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    environment: homologacao
+
+    steps:
+      - name: Download do artifact da imagem
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+
+      - name: Deploy automático em Homologação (porta 8080)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HOMOL_HOST }}
+          username: ${{ secrets.HOMOL_USERNAME }}
+          key: ${{ secrets.HOMOL_SSH_KEY }}
+          script: |
+            docker stop ${{ env.IMAGE_NAME }}-homol || true
+            docker rm ${{ env.IMAGE_NAME }}-homol || true
+            docker run -d --name ${{ env.IMAGE_NAME }}-homol -p 8080:8000 ${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+  Deploy_Producao:
+    name: Deploy Produção
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: producao
+
+    steps:
+      - name: Download do artifact da imagem
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+
+      - name: Deploy controlado em Produção
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            docker stop ${{ env.IMAGE_NAME }}-prd || true
+            docker rm ${{ env.IMAGE_NAME }}-prd || true
+            docker run -d --name ${{ env.IMAGE_NAME }}-prd -p 80:8000 ${{ env.IMAGE_NAME }}:${{ github.sha }}
