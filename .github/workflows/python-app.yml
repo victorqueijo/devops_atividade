@@ -29,7 +29,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Executar testes
-        run: pytest
+        run: python -m pytest
 
       - name: Build da imagem Docker
         run: docker build -t ${{ env.IMAGE_NAME }}:${{ github.sha }} .
@@ -56,6 +56,15 @@ jobs:
         with:
           name: docker-image
 
+      - name: Enviar imagem para Homologação
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.HOMOL_HOST }}
+          username: ${{ secrets.HOMOL_USERNAME }}
+          key: ${{ secrets.HOMOL_SSH_KEY }}
+          source: "image.tar"
+          target: "/home/${{ secrets.HOMOL_USERNAME }}"
+
       - name: Deploy automático em Homologação (porta 8080)
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -63,6 +72,7 @@ jobs:
           username: ${{ secrets.HOMOL_USERNAME }}
           key: ${{ secrets.HOMOL_SSH_KEY }}
           script: |
+            docker load -i /home/${{ secrets.HOMOL_USERNAME }}/image.tar
             docker stop ${{ env.IMAGE_NAME }}-homol || true
             docker rm ${{ env.IMAGE_NAME }}-homol || true
             docker run -d --name ${{ env.IMAGE_NAME }}-homol -p 8080:8000 ${{ env.IMAGE_NAME }}:${{ github.sha }}
@@ -80,6 +90,15 @@ jobs:
         with:
           name: docker-image
 
+      - name: Enviar imagem para Produção
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "image.tar"
+          target: "/home/${{ secrets.EC2_USERNAME }}"
+
       - name: Deploy controlado em Produção
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -87,6 +106,7 @@ jobs:
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            docker load -i /home/${{ secrets.EC2_USERNAME }}/image.tar
             docker stop ${{ env.IMAGE_NAME }}-prd || true
             docker rm ${{ env.IMAGE_NAME }}-prd || true
             docker run -d --name ${{ env.IMAGE_NAME }}-prd -p 80:8000 ${{ env.IMAGE_NAME }}:${{ github.sha }}
